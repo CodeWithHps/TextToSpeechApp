@@ -140,6 +140,13 @@
       box-shadow: 0 8px 25px rgba(0, 255, 175, 0.5);
     }
 
+    .status {
+      font-size: 13px;
+      margin-top: 15px;
+      min-height: 20px;
+      color: #00ffb2;
+    }
+
     @media (max-width: 480px) {
       .container {
         margin: 20px;
@@ -178,7 +185,8 @@
       <input type="range" id="rate" min="0.1" max="2" step="0.1" value="1" />
     </div>
 
-    <button onclick="speakText()">🔊 Speak</button>
+    <button onclick="handleSpeakButton()" id="speak-btn">🔊 Speak</button>
+    <div class="status" id="status"></div>
   </div>
 
   <script>
@@ -186,38 +194,144 @@
     const rateSlider = document.getElementById("rate");
     const rateValue = document.getElementById("rateValue");
     const instructions = document.getElementById("instructions");
+    const statusEl = document.getElementById("status");
+    const speakBtn = document.getElementById("speak-btn");
+    const textInput = document.getElementById("text");
 
     let voices = [];
+    let isSpeaking = false;
+    let currentUtterance = null;
 
     function loadVoices() {
-      voices = speechSynthesis.getVoices();
+      voices = window.speechSynthesis.getVoices();
       voiceSelect.innerHTML = '';
-      voices.forEach((voice, i) => {
-        const option = document.createElement("option");
-        option.value = i;
-        option.text = `${voice.name} (${voice.lang})`;
-        voiceSelect.appendChild(option);
+      
+      if (voices.length === 0) {
+        voiceSelect.innerHTML = '<option value="">No voices available</option>';
+        statusEl.textContent = "No voices found. Try using Chrome browser.";
+        return;
+      }
+      
+      // Add default option
+      const defaultOption = document.createElement("option");
+      defaultOption.value = "";
+      defaultOption.textContent = "Select a voice...";
+      voiceSelect.appendChild(defaultOption);
+      
+      // Group voices by language
+      const voicesByLang = {};
+      voices.forEach(voice => {
+        if (!voicesByLang[voice.lang]) {
+          voicesByLang[voice.lang] = [];
+        }
+        voicesByLang[voice.lang].push(voice);
       });
+      
+      // Add voices to select
+      Object.keys(voicesByLang).sort().forEach(lang => {
+        voicesByLang[lang].forEach(voice => {
+          const option = document.createElement("option");
+          option.value = voice.voiceURI;
+          option.textContent = `${voice.name} (${voice.lang})${voice.default ? ' - Default' : ''}`;
+          voiceSelect.appendChild(option);
+        });
+      });
+      
+      // Try to select a default English voice
+      const englishVoice = voices.find(v => v.lang.startsWith('en') && v.default);
+      if (englishVoice) {
+        voiceSelect.value = englishVoice.voiceURI;
+      }
+      
+      statusEl.textContent = `Loaded ${voices.length} voices`;
+      // In your loadVoices() function, filter for natural-sounding voices
+      function loadVoices() {
+        voices = window.speechSynthesis.getVoices();
+        voiceSelect.innerHTML = '';
+        
+        // Filter for more natural voices (these names may vary by browser/OS)
+        const naturalVoices = voices.filter(voice => 
+          voice.name.includes('Natural') || 
+          voice.name.includes('Premium') ||
+          voice.name.includes('WaveNet') ||
+          voice.voiceURI.includes('Natural')
+        );
+        
+        // Fall back to all voices if no "natural" ones found
+        const voicesToUse = naturalVoices.length > 0 ? naturalVoices : voices;
+        
+        // Add to select dropdown
+        voicesToUse.forEach(voice => {
+          const option = document.createElement("option");
+          option.value = voice.voiceURI;
+          option.textContent = `${voice.name} (${voice.lang})`;
+          voiceSelect.appendChild(option);
+          
+          // Auto-select the first natural voice
+          if (naturalVoices.length > 0 && voiceSelect.value === "") {
+            voiceSelect.value = voice.voiceURI;
+          }
+        });
+        
+        statusEl.textContent = naturalVoices.length > 0 
+          ? `Loaded ${naturalVoices.length} enhanced voices` 
+          : `Loaded standard voices (try Chrome for better quality)`;
+      }
     }
 
-    speechSynthesis.onvoiceschanged = loadVoices;
-
-    rateSlider.addEventListener('input', () => {
-      rateValue.textContent = rateSlider.value;
-    });
+    function handleSpeakButton() {
+      if (isSpeaking) {
+        stopSpeaking();
+        return;
+      }
+      speakText();
+    }
 
     function speakText() {
-      const text = document.getElementById("text").value;
-      const utterance = new SpeechSynthesisUtterance(text);
-
-      utterance.rate = parseFloat(rateSlider.value);
-      const selectedVoice = voices[voiceSelect.value];
-      if (selectedVoice) {
-        utterance.voice = selectedVoice;
-        utterance.lang = selectedVoice.lang;
+      const text = textInput.value.trim();
+      
+      if (!text) {
+        statusEl.textContent = "Please enter some text first";
+        return;
       }
+      
+      if (!voiceSelect.value) {
+        statusEl.textContent = "Please select a voice";
+        return;
+      }
+      
+      // Cancel any current speech
+      window.speechSynthesis.cancel();
+      
+      // Find the selected voice
+      const selectedVoice = voices.find(v => v.voiceURI === voiceSelect.value);
+      if (!selectedVoice) {
+        statusEl.textContent = "Selected voice not available";
+        return;
+      }
+      
+      currentUtterance = new SpeechSynthesisUtterance(text);
+      currentUtterance.rate = parseFloat(rateSlider.value);
+      currentUtterance.voice = selectedVoice;
+      
+      isSpeaking = true;
+      speakBtn.textContent = '⏹️ Stop';
+      statusEl.textContent = "Speaking...";
+      
+      currentUtterance.onend = currentUtterance.onerror = () => {
+        isSpeaking = false;
+        speakBtn.textContent = '🔊 Speak';
+        statusEl.textContent = "Ready";
+      };
+      
+      window.speechSynthesis.speak(currentUtterance);
+    }
 
-      speechSynthesis.speak(utterance);
+    function stopSpeaking() {
+      window.speechSynthesis.cancel();
+      isSpeaking = false;
+      speakBtn.textContent = '🔊 Speak';
+      statusEl.textContent = "Stopped";
     }
 
     function toggleInstructions() {
@@ -229,6 +343,31 @@
         event.target.textContent = "Show Instructions";
       }
     }
+
+    // Initialize voices
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+      speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    
+    // Load voices when page loads
+    window.addEventListener('load', function() {
+      loadVoices();
+      
+      // Some browsers need a timeout
+      setTimeout(loadVoices, 500);
+      
+      // Update rate display
+      rateSlider.addEventListener('input', () => {
+        rateValue.textContent = rateSlider.value;
+      });
+      
+      // Allow Enter key to trigger speech
+      textInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          speakText();
+        }
+      });
+    });
   </script>
 </body>
-</html>
+</html> 
